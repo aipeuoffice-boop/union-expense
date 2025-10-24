@@ -1,10 +1,74 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" href="/union-expense/public/icons/app-192.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Union Expense Tracker</title>
+
+    <!-- ✅ Postal Union Web App Meta -->
+    <title>All India Postal Employees Union - Postman & MTS</title>
+    <meta
+      name="description"
+      content="All India Postal Employees Union Postman & MTS | Andhra Pradesh Circle - Srikalahasti"
+    />
+
+    <!-- ✅ Apple PWA Support -->
+<!-- PWA / Mobile -->
+    <link rel="apple-touch-icon" href="/union-expense/public/icons/app-192.png">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes"> <!-- still fine for iOS -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#C01622">
+    <link rel="manifest" href="/manifest.webmanifest">
+
+
+    <!-- ✅ Postal Brand Styling -->
+    <style>
+      :root {
+        --postal-red: #c01622;
+        --postal-gold: #ffcc00;
+        --postal-paper: #fffaf5;
+        --postal-ink: #222;
+      }
+
+      body {
+        background-color: var(--postal-paper);
+        color: var(--postal-ink);
+        font-family: "Inter", system-ui, sans-serif;
+        margin: 0;
+      }
+
+      .bg-postal-red {
+        background-color: var(--postal-red);
+      }
+
+      .text-postal-red {
+        color: var(--postal-red);
+      }
+
+      .bg-postal-paper {
+        background-color: var(--postal-paper);
+      }
+
+      .text-postal-ink {
+        color: var(--postal-ink);
+      }
+
+      .container {
+        width: 100%;
+        max-width: 1024px;
+        margin: 0 auto;
+        padding: 0 1rem;
+      }
+
+      /* Fix viewport scaling for mobile PWA look */
+      html,
+      body {
+        height: 100%;
+      }
+    </style>
   </head>
+
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

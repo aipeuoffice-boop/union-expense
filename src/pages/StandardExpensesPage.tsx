@@ -84,7 +84,7 @@ export default function StandardExpensesPage() {
   return (
     <div className="mx-auto max-w-3xl">
       <h1 className="text-xl font-semibold">Daily Standard Expenses</h1>
-      <p className="text-sm text-gray-600 mb-4">Manage templates and post today’s standard outgoing expenses in one tap.</p>
+        <p className="text-sm text-gray-600 mb-4">Manage templates and post today’s standard expenses in one tap.</p>
 
       <div className="rounded-2xl border bg-white p-4 shadow-sm mb-5">
         <div className="grid sm:grid-cols-3 gap-3">
@@ -115,7 +115,7 @@ export default function StandardExpensesPage() {
 
         <form className="grid sm:grid-cols-3 gap-3 mb-4" onSubmit={(e)=>{e.preventDefault(); addMut.mutate()}}>
           <div>
-            <label className="text-sm">Outgoing Category</label>
+            <label className="text-sm">Expense Category</label>
             <select className="w-full rounded-lg border px-3 py-2" value={categoryId} onChange={e => setCategoryId(e.target.value)} required>
               <option value="">Select…</option>
               {outCats?.map((c:any) => <option key={c.id} value={c.id}>{c.name}</option>)}

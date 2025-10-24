@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { supabase } from "../lib/supabase"
 import { useState } from "react"
+import { kindLabel } from "../lib/format"
 
 type Category = { id: string; name: string; kind: "INCOMING"|"OUTGOING"; is_standard: boolean; created_at: string }
 
@@ -41,7 +42,7 @@ export default function CategoriesPage() {
   return (
     <div className="mx-auto max-w-2xl">
       <h1 className="text-xl font-semibold">Categories</h1>
-      <p className="text-sm text-gray-600 mb-4">Income/Expense categories. Mark standard daily expenses.</p>
+  <p className="text-sm text-gray-600 mb-4">Income and expense categories. Mark standard daily expenses.</p>
 
       <form className="rounded-2xl border bg-white p-4 shadow-sm" onSubmit={(e)=>{e.preventDefault(); addMut.mutate({ name, kind, is_standard: isStandard })}}>
         <div className="grid gap-3 sm:grid-cols-3">
@@ -51,9 +52,9 @@ export default function CategoriesPage() {
           </div>
           <div>
             <label className="text-sm">Kind</label>
-            <select className="w-full rounded-lg border px-3 py-2" value={kind} onChange={e=>setKind(e.target.value as any)}>
-              <option value="INCOMING">INCOMING</option>
-              <option value="OUTGOING">OUTGOING</option>
+            <select className="w-full rounded-lg border px-3 py-2" value={kind} onChange={e=>setKind(e.target.value as "INCOMING"|"OUTGOING") }>
+              <option value="INCOMING">{kindLabel("INCOMING")}</option>
+              <option value="OUTGOING">{kindLabel("OUTGOING")}</option>
             </select>
           </div>
         </div>
@@ -78,7 +79,7 @@ export default function CategoriesPage() {
               <li key={c.id} className="flex items-center justify-between py-2">
                 <div>
                   <div className="font-medium">{c.name}</div>
-                  <div className="text-xs text-gray-600">{c.kind} {c.is_standard ? "• standard" : ""}</div>
+                  <div className="text-xs text-gray-600">{kindLabel(c.kind)} {c.is_standard ? "• standard" : ""}</div>
                 </div>
                 <button onClick={()=>delMut.mutate(c.id)} className="text-red-600 text-sm underline" disabled={delMut.isPending}>
                   Delete

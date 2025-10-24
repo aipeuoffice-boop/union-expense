@@ -1,49 +1,49 @@
-
 import { useQuery } from "@tanstack/react-query"
 import { supabase } from "../lib/supabase"
+import { inr } from "../lib/format"
+import { Link } from "react-router-dom"
 
-async function fetchBalance() {
-  // v_balance aggregates visible rows; RLS on base tables applies.
-  const { data, error } = await supabase
-    .from("v_balance")
-    .select("balance")
-    .maybeSingle()
-  if (error) throw error
-  return data?.balance ?? 0
+async function fetchBalance(): Promise<number> {
+  // Prefer the view if you have it; else compute with a quick aggregate
+  const { data, error } = await supabase.from("v_balance").select("balance").limit(1)
+  if (!error && data && data.length) return Number(data[0].balance) || 0
+
+  // Fallback: compute from journal if the view is empty
+  const { data: rows, error: e2 } = await supabase
+    .from("journal")
+    .select("kind, amount")
+    .limit(20000) // enough for single-user
+  if (e2) throw e2
+  let incoming = 0, outgoing = 0
+  for (const r of rows ?? []) {
+    if (r.kind === "INCOMING") incoming += Number(r.amount) || 0
+    else outgoing += Number(r.amount) || 0
+  }
+  return incoming - outgoing
 }
 
 export default function Home() {
-  const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["balance"],
-    queryFn: fetchBalance
-  })
+  const { data: balance, isLoading } = useQuery({ queryKey: ["v_balance"], queryFn: fetchBalance })
 
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <div className="mx-auto max-w-xl">
-        <h1 className="text-2xl font-bold">Union Expense Tracker</h1>
-        <p className="text-sm text-gray-600 mt-1">Connected to Supabase ✓</p>
+    <div className="container">
+      <h1 className="h1">Dashboard</h1>
+      <p className="small mb-4">Welcome to the Postal Union expense tracker.</p>
 
-        <div className="mt-6 rounded-2xl border bg-white p-5 shadow-sm">
-          {isLoading && <p>Loading balance…</p>}
-          {error && (
-            <p className="text-red-600">
-              {((error as unknown) as Error).message ?? "Failed to load balance"}
-            </p>
-          )}
-          {!isLoading && !error && (
-            <>
-              <p className="text-gray-800">
-                Current balance: <span className="font-semibold">₹{Number(data).toLocaleString("en-IN")}</span>
-              </p>
-              <button
-                className="mt-4 rounded-lg border px-3 py-2"
-                onClick={()=>refetch()}
-              >
-                Refresh
-              </button>
-            </>
-          )}
+      <div className="grid sm:grid-cols-3 gap-3">
+        <div className="card p-4">
+          <div className="text-xs text-gray-600">Current Balance</div>
+          <div className="text-2xl font-semibold">{isLoading ? "…" : inr(balance ?? 0)}</div>
+        </div>
+
+        <div className="card p-4">
+          <div className="text-xs text-gray-600">Quick Action</div>
+          <Link to="/journal" className="btn btn-primary mt-2 inline-block">Add Entry</Link>
+        </div>
+
+        <div className="card p-4">
+          <div className="text-xs text-gray-600">Reports</div>
+          <Link to="/stats" className="btn btn-outline mt-2 inline-block">View Stats</Link>
         </div>
       </div>
     </div>

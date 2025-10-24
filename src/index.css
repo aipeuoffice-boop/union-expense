@@ -2,5 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color-scheme: light; }
-html, body, #root { height: 100%; }
+/* App background + smoother text */
+body { @apply bg-postal-sheet text-postal-ink antialiased; }
+.container { @apply mx-auto max-w-6xl px-3 sm:px-4; }
+
+/* Card */
+.card { @apply rounded-xl2 border bg-white shadow-card; }
+
+/* Buttons */
+.btn { @apply inline-flex items-center justify-center rounded-lg px-4 py-2 font-medium; }
+.btn-primary { @apply bg-postal-red text-white hover:opacity-95; }
+.btn-outline  { @apply border hover:bg-gray-50; }
+.btn-ghost    { @apply hover:bg-gray-100; }
+
+/* Inputs */
+.input { @apply w-full rounded-lg border px-3 py-2; }
+.select { @apply w-full rounded-lg border px-3 py-2; }
+
+/* Headings */
+.h1 { @apply text-2xl font-bold; }
+.h2 { @apply text-lg font-semibold; }
+.small { @apply text-sm text-gray-600; }

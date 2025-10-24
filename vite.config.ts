@@ -1,27 +1,33 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+// vite.config.ts
+
+
 
 export default defineConfig({
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: [],
       manifest: {
-        name: 'Union Expense Tracker',
-        short_name: 'Expenses',
+        name: "All India Postal Employees Union — Postman & MTS",
+        short_name: "AIPEU PM&MTS",
         start_url: '/',
         display: 'standalone',
-        background_color: '#ffffff',
-        theme_color: '#000000',
+        background_color: "#ffffff",
+        theme_color: "#C01622",
         icons: [
           { src: '/icons/app-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icons/app-512.png', sizes: '512x512', type: 'image/png' }
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024, // 6 MiB
+        clientsClaim: true,
+        skipWaiting: true,
+        cleanupOutdatedCaches: true,
+        globPatterns: ["**/*.{js,css,html,ico,png,svg,json,webmanifest}"],
         runtimeCaching: [
           {
             urlPattern: ({ request }) => request.mode === 'navigate',
@@ -52,5 +58,17 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     hmr: { protocol: 'ws', host: '127.0.0.1', port: 5173, clientPort: 5173 }
-  }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          charts: ["recharts"],
+          supabase: ["@supabase/supabase-js"],
+        },
+      },
+    },
+  },
 })
+
+
