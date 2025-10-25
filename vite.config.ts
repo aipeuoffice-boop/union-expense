@@ -19,7 +19,7 @@ export default defineConfig({
         theme_color: "#C01622",
         icons: [
           { src: '/icons/app-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icons/app-512.png', sizes: '512x512', type: 'image/png' }
+          { src: '/icons/app-192.png', sizes: '512x512', type: 'image/png' }
         ]
       },
       workbox: {

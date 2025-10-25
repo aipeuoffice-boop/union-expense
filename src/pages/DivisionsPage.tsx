@@ -45,7 +45,7 @@ export default function DivisionsPage() {
             <input className="w-full rounded-lg border px-3 py-2" value={name} onChange={e=>setName(e.target.value)} required />
           </div>
           <div>
-            <label className="text-sm">Area (district/mandal)</label>
+            <label className="text-sm">Area (Region)</label>
             <input className="w-full rounded-lg border px-3 py-2" value={area} onChange={e=>setArea(e.target.value)} />
           </div>
         </div>

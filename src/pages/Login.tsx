@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { useAuth } from "../auth"
 
 type Method = "magic" | "password" | "pin"
@@ -11,6 +12,7 @@ function getErrMsg(e: unknown) {
 
 export default function Login() {
   const { signInWithMagicLink, signInWithPassword, signUpWithPassword, signInWithPin, signUpWithPin } = useAuth()
+  const navigate = useNavigate()
   const [method, setMethod] = useState<Method>("magic")
   const [mode, setMode] = useState<"signin" | "signup">("signin")
 
@@ -35,7 +37,10 @@ export default function Login() {
         if (mode === "signin") {
           const { error } = await signInWithPassword(email, secret)
           if (error) setErr(getErrMsg(error))
-          else setSent(true)
+          else {
+            // Successful sign-in: redirect to home
+            navigate("/", { replace: true })
+          }
         } else {
           const { error } = await signUpWithPassword(email, secret)
           if (error) setErr(getErrMsg(error))
@@ -46,7 +51,10 @@ export default function Login() {
         if (mode === "signin") {
           const { error } = await signInWithPin(email, secret)
           if (error) setErr(getErrMsg(error))
-          else setSent(true)
+          else {
+            // Successful sign-in: redirect to home
+            navigate("/", { replace: true })
+          }
         } else {
           const { error } = await signUpWithPin(email, secret)
           if (error) setErr(getErrMsg(error))
@@ -61,8 +69,10 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 grid place-items-center p-6">
-      <div className="w-full max-w-sm rounded-2xl border bg-white p-6 shadow-sm">
+    // Use flex centering for more predictable vertical centering across devices.
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 sm:p-6">
+      {/* Card constrained to viewport height to avoid overflow; internal scroll if content exceeds height */}
+      <div className="w-full max-w-sm rounded-2xl border bg-white p-6 shadow-sm overflow-y-auto max-h-[calc(100vh-4rem)]">
         <h1 className="text-xl font-semibold">Sign in</h1>
 
         <div className="mt-3 flex gap-2 text-sm">
