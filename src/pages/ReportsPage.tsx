@@ -209,8 +209,12 @@ export default function ReportsPage() {
   const [areaValues, setAreaValues] = useState<string[]>([]) // Area (multi)
 
   // Toggles
-  const [includeNotes, setIncludeNotes] = useState<boolean>(true)
+  // Default: only running balance shown; other optional columns unchecked by default
+  const [includeNotes, setIncludeNotes] = useState<boolean>(false)
   const [includeArea, setIncludeArea] = useState<boolean>(false) // Show Area column + sort
+  const [includeTagged, setIncludeTagged] = useState<boolean>(false) // Show Tagged To column
+  const [includeKind, setIncludeKind] = useState<boolean>(false) // Show Kind column
+  const [includeCumulative, setIncludeCumulative] = useState<boolean>(true) // Show running cumulative column (default checked)
 
   const { data: divisions } = useQuery({ queryKey: ["divisions"], queryFn: fetchDivisions })
   const { data: people } = useQuery({ queryKey: ["persons"], queryFn: fetchPeople })
@@ -309,10 +313,9 @@ export default function ReportsPage() {
         .join(", ")
       if (names) list.push(`Category: ${names}`)
     }
-    if (includeArea) list.push("Categorized by Area")
-    if (!includeNotes) list.push("Notes: Hidden")
+  // Note: the chips are filter summaries (division, person, group, category) — do not show column toggles here.
     return list
-  }, [kind, divisionIds, areaValues, personIds, groupIds, categoryIds, divisions, people, groups, categories, includeArea, includeNotes])
+  }, [kind, divisionIds, areaValues, personIds, groupIds, categoryIds, divisions, people, groups, categories])
 
   // Title
   const reportTitle = useMemo(() => {
@@ -332,17 +335,42 @@ export default function ReportsPage() {
 
   // CSV export
   async function downloadCSV() {
-    const csvRows = (rows ?? []).map((r) => ({
-      Date: r.ts,
-      Kind: kindLabel(r.kind),
-      Division: firstName(r.division, ""),
-      Area: (Array.isArray(r.division) ? r.division[0]?.area : (r.division as any)?.area) ?? "",
-      Person: firstPerson(r.person, ""),
-      Group: firstName(r.group as any, ""),
-      Category: firstName(r.category, ""),
-      Amount: Number(r.amount).toFixed(2),
-      Notes: r.notes ?? "",
+    // Build CSV rows in displayed order; if cumulative requested, include running
+    const list = (rows ?? []).map((r) => ({
+      ts: r.ts,
+      kind: kindLabel(r.kind),
+      division: firstName(r.division, ""),
+      area: (Array.isArray(r.division) ? r.division[0]?.area : (r.division as any)?.area) ?? "",
+      person: firstPerson(r.person, ""),
+      group: firstName(r.group as any, ""),
+      category: firstName(r.category, ""),
+      incomingNum: r.kind === "INCOMING" ? Number(r.amount) : 0,
+      expenseNum: r.kind === "OUTGOING" ? Number(r.amount) : 0,
+      notes: r.notes ?? "",
     }))
+
+    if (includeArea) {
+      list.sort((a, b) => (a.area || "").localeCompare(b.area || "", undefined, { sensitivity: "accent" }))
+    }
+
+    let running = 0
+    const csvRows = list.map((r) => {
+      running += (r.incomingNum || 0) - (r.expenseNum || 0)
+      const row: any = {
+        Date: r.ts,
+        Kind: r.kind,
+        Division: r.division,
+        Area: r.area,
+        Person: r.person,
+        Group: r.group,
+        Category: r.category,
+        Incoming: r.incomingNum ? r.incomingNum.toFixed(2) : "",
+        Expense: r.expenseNum ? r.expenseNum.toFixed(2) : "",
+        Notes: r.notes,
+      }
+      if (includeCumulative) row.Running = running.toFixed(2)
+      return row
+    })
     const csv = Papa.unparse(csvRows, { header: true })
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" })
     const url = URL.createObjectURL(blob)
@@ -354,8 +382,11 @@ export default function ReportsPage() {
   }
 
   // ========================== PDF builder ==========================
-  function buildDoc() {
-    const postalRed = "#C01622"
+  async function buildDoc() {
+  const postalRed = "#C01622"
+  // Lightened table header colour so the red text/logo pop nicely on it
+  // More vibrant, yellowish shade so red logo/text pop strongly on top
+  const tableHeaderColour = [255, 214, 51]
     const ink = "#111111"
 
     const doc = new jsPDF({ unit: "pt", format: "a4" })
@@ -366,19 +397,63 @@ export default function ReportsPage() {
     const pageH = doc.internal.pageSize.getHeight()
     const marginX = 40
 
-    // ==== HEADER band ====
-    const headerH = 66
-    doc.setFillColor(postalRed)
+  // ==== HEADER band ====
+  const headerH = 66
+  // Use the table header colour for the header band (swap)
+  doc.setFillColor(tableHeaderColour[0], tableHeaderColour[1], tableHeaderColour[2])
     doc.rect(0, 0, pageW, headerH, "F")
-    doc.setTextColor("#FFFFFF")
+  // Try to render a left-aligned logo from assets (optional). Place it inside the header band.
+  let logoW = 0
+  try {
+      // Vite-resolved asset path; put your logo in src/assets/aipeu-logo.png
+      const logoUrl = new URL("../assets/aipeu-logo.png", import.meta.url).href
+  let resp = await fetch(logoUrl)
+      if (!resp.ok) {
+        // fallback — look for a public file (e.g. place `aipeu-logo.png` in the `public/` folder)
+        resp = await fetch("/aipeu-logo.png")
+      }
+      if (resp.ok) {
+        const blob = await resp.blob()
+        const reader = new FileReader()
+        // convert to data URL for jsPDF
+        await new Promise((resolve) => {
+          reader.onloadend = resolve
+          reader.readAsDataURL(blob)
+        })
+  const dataUrl = reader.result as string
+  // Pick jsPDF format from mime type
+  const mime = blob.type || "image/png"
+  const imgFmt: "PNG" | "JPEG" = mime.includes("jpeg") || mime.includes("jpg") ? "JPEG" : "PNG"
+        // set logo width/height inside header band
+  // Make logo smaller; cap at 64px for the emblem
+  const logoH = headerH - 18
+  logoW = Math.min(logoH * 0.9, 64)
+  // Draw the logo without the white rounded background and position it left inside the band
+  // no logoPad used when not drawing a white background; keep logoX / logoY for position only
+  const logoX = Math.max(2, marginX - 18) // nudge left slightly more
+  const logoY = 8
+  // Now stamp the logo on top — using the image format from the blob
+  doc.addImage(dataUrl, imgFmt, logoX, logoY, logoW, logoH)
+      }
+    } catch (err) {
+      console.debug("Logo not found or failed to load", err)
+    }
+  // The header band is now yellow; use the red color for fonts to match the postal emblem
+  doc.setTextColor(postalRed)
     doc.setFontSize(19)
     doc.setFont("helvetica", "bold")
-    doc.text("All India Postal Employees Union — Postman & MTS", pageW / 2, 26, { align: "center", baseline: "middle" })
+    // If the logo exists, shift the centered header slightly to account for visual balance
+    // (logoW/2 + padding) — we bias a bit to add more space between the logo and text
+  const centerX = pageW / 2 + (logoW ? logoW / 2 + 8 : 0)
+    // Primary title centered inside the header band
+    doc.text("All India Postal Employees Union — Postman & MTS", centerX, headerH / 2 - 12, { align: "center", baseline: "middle" })
     doc.setFontSize(12)
-    doc.text("Andhra Pradesh Circle • Srikalahasti", pageW / 2, 44, { align: "center", baseline: "middle" })
+    doc.text("Andhra Pradesh Circle • Srikalahasti", centerX, headerH / 2 + 6, { align: "center", baseline: "middle" })
 
-    // ==== Date range (centered) ====
-    let y = headerH + 18
+    // No contact or officials lines — keep header compact with just logo & title
+
+  // ==== Date range (centered) ====
+  let y = headerH + 18
     doc.setTextColor(ink)
     doc.setFont("helvetica", "bold")
     doc.setFontSize(10)
@@ -452,15 +527,22 @@ export default function ReportsPage() {
     let bodyRaw = (rows ?? []).map((r) => {
       const tagged = firstPerson(r.person, "") || firstName(r.group as any, "") || "—"
       const area = (Array.isArray(r.division) ? r.division[0]?.area : (r.division as any)?.area) ?? "—"
+      const amt = Number(r.amount) || 0
       return {
         date: r.ts,
-        kind: kindLabel(r.kind),
+        kind: r.kind,
+        kindLabel: kindLabel(r.kind),
         division: firstName(r.division, "—"),
         area,
         tagged,
         category: firstName(r.category, "—"),
-        amount: formatAmount(Number(r.amount) || 0),
+        incomingNum: r.kind === "INCOMING" ? amt : 0,
+        expenseNum: r.kind === "OUTGOING" ? amt : 0,
+        incoming: r.kind === "INCOMING" ? formatAmount(amt) : "",
+        expense: r.kind === "OUTGOING" ? formatAmount(amt) : "",
         notes: r.notes ?? "—",
+        runningNum: 0,
+        running: "",
       }
     })
 
@@ -468,91 +550,232 @@ export default function ReportsPage() {
       bodyRaw = bodyRaw.sort((a, b) => a.area.localeCompare(b.area, undefined, { sensitivity: "accent" }))
     }
 
+    // Compute running cumulative (in order of bodyRaw) if requested
+    if (includeCumulative) {
+      let running = 0
+      bodyRaw = bodyRaw.map((r) => {
+        running += (r.incomingNum || 0) - (r.expenseNum || 0)
+        return { ...r, runningNum: running, running: formatAmount(running) }
+      })
+    }
+
     const tableMargin = { left: marginX, right: marginX }
     const innerW = pageW - tableMargin.left - tableMargin.right
 
-    const headers = ["Date", "Kind", "Division", ...(includeArea ? ["Area"] : []), "Tagged To", "Category", "Amount", ...(includeNotes ? ["Notes"] : [])]
+    // Build headers dynamically based on toggles
+  const headers: string[] = []
+  headers.push("Date")
+  if (includeKind) headers.push("Kind")
+  headers.push("Division")
+  if (includeArea) headers.push("Area")
+  if (includeTagged) headers.push("Tagged To")
+  headers.push("Category", "Incoming", "Expense")
+  if (includeCumulative) headers.push("Running")
+  if (includeNotes) headers.push("Notes")
 
-    const baseCols: number[] = includeArea
-      ? includeNotes
-        ? [70, 60, 112, 80, 92, 100, 68, 110]
-        : [78, 66, 132, 88, 108, 112, 76]
-      : includeNotes
-        ? [74, 62, 120, 92, 102, 70, 120]
-        : [84, 68, 138, 108, 116, 86]
+    // Width map for each header (sensible defaults)
+    const widthMap: Record<string, number> = {
+      Date: 70,
+      Kind: 60,
+      Division: 112,
+      Area: 80,
+      "Tagged To": 92,
+      Category: 100,
+  Incoming: 60,
+  Expense: 60,
+    Running: 60,
+      Notes: 110,
+    }
 
-    const amountIdx = headers.indexOf("Amount")
+  const baseCols = headers.map((h) => widthMap[h] ?? 50)
+
+    // Keep numeric columns (Incoming/Expense) fixed when scaling; scale other columns if overflow
     const totalW = baseCols.reduce((a, b) => a + b, 0)
-    let colWidths = [...baseCols]
-    if (totalW > innerW) {
-      const fixedSum = colWidths[amountIdx]
-      const scalableIdx = colWidths.map((_, i) => i).filter((i) => i !== amountIdx)
+  let colWidths = [...baseCols]
+  // If content is wider than page, shrink non-numeric columns proportionally.
+  if (totalW > innerW) {
+      const incomingIdx = headers.indexOf("Incoming")
+      const expenseIdx = headers.indexOf("Expense")
+      const runningIdx = headers.indexOf("Running")
+    const fixedIdxs = [incomingIdx, expenseIdx, runningIdx].filter((i) => i >= 0)
+    const fixedSum = fixedIdxs.reduce((s, i) => s + colWidths[i], 0)
+      const scalableIdx = colWidths.map((_, i) => i).filter((i) => !fixedIdxs.includes(i))
       const scalableSum = scalableIdx.reduce((s, i) => s + colWidths[i], 0)
-      const factor = (innerW - fixedSum) / scalableSum
-      colWidths = colWidths.map((w, i) => (i === amountIdx ? w : Math.max(50, w * factor)))
+  const factor = scalableSum > 0 ? (innerW - fixedSum) / scalableSum : 1
+  colWidths = colWidths.map((w, i) => (fixedIdxs.includes(i) ? w : Math.max(50, w * factor)))
+    } else if (totalW < innerW) {
+      // If there's spare room, expand non-numeric columns to fill the page using the same proportion.
+  const incomingIdx = headers.indexOf("Incoming")
+  const expenseIdx = headers.indexOf("Expense")
+  const runningIdx = headers.indexOf("Running")
+  const fixedIdxs = [incomingIdx, expenseIdx, runningIdx].filter((i) => i >= 0)
+  // do not modify fixed columns (Incoming/Expense) when expanding
+      const scalableIdx = colWidths.map((_, i) => i).filter((i) => !fixedIdxs.includes(i))
+      const scalableSum = scalableIdx.reduce((s, i) => s + colWidths[i], 0)
+      const extra = innerW - totalW
+      // If no scalable columns (unlikely), leave as is.
+      if (scalableIdx.length > 0) {
+        colWidths = colWidths.map((w, i) => {
+          if (fixedIdxs.includes(i)) return w
+          const share = scalableSum > 0 ? w / scalableSum : 1 / scalableIdx.length
+          // Give more to Category/Notes (base widths already reflect this); clamp to a max.
+          const newW = w + extra * share
+          return Math.min(450, Math.max(50, newW))
+        })
+      }
     }
 
     const body = bodyRaw.map((r) => {
-      const arr: (string | number)[] = [r.date, r.kind, r.division]
+      const arr: (string | number)[] = [r.date]
+      if (includeKind) arr.push(r.kindLabel)
+      arr.push(r.division)
       if (includeArea) arr.push(r.area)
-      arr.push(r.tagged, r.category, r.amount)
+      if (includeTagged) arr.push(r.tagged)
+      arr.push(r.category, r.incoming, r.expense)
+      if (includeCumulative) arr.push(r.running ?? "")
       if (includeNotes) arr.push(r.notes)
       return arr
     })
 
-    const notesIndex = includeNotes ? headers.length - 1 : -1
+  const notesIndex = includeNotes ? headers.indexOf("Notes") : -1
     const MAX_NOTE_LINES = 3
-    const noteWrapWidth = includeNotes ? colWidths[notesIndex] - 8 : 0
+  const noteWrapWidth = includeNotes && notesIndex >= 0 ? Math.max(20, colWidths[notesIndex] - 8) : 0
 
-    autoTable(doc, {
+  autoTable(doc, {
       startY: tableStartY,
       head: [headers],
       body,
-      theme: "striped",
+      theme: "grid",
       margin: tableMargin,
       tableWidth: innerW,
       styles: {
         fontSize: 9,
         cellPadding: 4,
-        lineColor: 230,
+        lineColor: [0, 0, 0],
         textColor: 34,
+        // Non-numeric fields should wrap to new lines; numeric columns will override to 'visible'
         overflow: "linebreak",
         valign: "middle",
         halign: "left",
       },
       headStyles: {
-        fillColor: [255, 204, 0],
-        textColor: 17,
-        lineColor: 230,
+        // Table header now uses postal red with white text
+        fillColor: [192, 22, 34], // postal red
+        textColor: [255, 255, 255],
+        lineColor: [0, 0, 0],
         fontStyle: "bold",
         halign: "left",
       },
       alternateRowStyles: { fillColor: [250, 250, 250] },
-      columnStyles: colWidths.reduce((acc: any, w, i) => {
-        acc[i] = { cellWidth: w, valign: "top", halign: "left" }
+      columnStyles: colWidths.reduce((acc: Record<number, any>, w, i) => {
+        const header = headers[i] ?? ""
+  // Numeric/date columns: prevent wrapping and right-align
+  const isNumeric = header === "Incoming" || header === "Expense" || header === "Running"
+  acc[i] = { cellWidth: w, valign: "top", halign: isNumeric ? "right" : "left", overflow: isNumeric ? "visible" : "linebreak" }
         return acc
       }, {}),
       didParseCell: (data: any) => {
         if (includeNotes && data.section === "body" && data.column.index === notesIndex) {
           const raw = (data.cell.raw ?? "").toString()
-          data.cell.text = clipTextLines(doc, raw, noteWrapWidth, MAX_NOTE_LINES) as any
+          data.cell.text = clipTextLines(doc, raw, noteWrapWidth, MAX_NOTE_LINES) as unknown as string[]
         }
       },
       didDrawPage: () => {
         // Footer band (centered text)
-        const bandH = 40
+  const bandH = 28
         const bandY = pageH - bandH
-        doc.setFillColor("#C01622")
+  // Use the same light header colour for the footer so header/footer are consistent
+  doc.setFillColor(tableHeaderColour[0], tableHeaderColour[1], tableHeaderColour[2])
         doc.rect(0, bandY, pageW, bandH, "F")
-        doc.setTextColor("#FFFFFF")
-        doc.setFontSize(9)
+  // Footer text should be postalRed on a light background
+  doc.setTextColor(postalRed)
+        doc.setFontSize(8)
         const pageStr = `Page ${doc.getNumberOfPages()}`
         const genStr = `Generated: ${new Date().toLocaleString()}`
-        doc.text(`${pageStr}  •  ${genStr}`, pageW / 2, bandY + 24, { align: "center", baseline: "middle" })
+        doc.text(`${pageStr}  •  ${genStr}`, pageW / 2, bandY + 15, { align: "center", baseline: "middle" })
         doc.setTextColor(ink)
       },
       pageBreak: "auto",
-      tableLineWidth: 0.1,
+      tableLineWidth: 0.5,
+      tableLineColor: [0, 0, 0],
+    })
+
+    // Totals row: draw a separate one-row table aligned to the same columns so we can style totals easily
+    const finalY = (doc as any).lastAutoTable?.finalY ?? tableStartY
+    const totalsStartY = finalY + 8
+
+    // Build totals row array aligned with headers
+  const totalsRow: (string | number)[] = headers.map((h) => {
+      if (h === "Date") return "Totals"
+      if (h === "Incoming") return formatAmount(totals.inc)
+      if (h === "Expense") return formatAmount(totals.out)
+      if (h === "Running") return ""
+      // other columns empty
+      return ""
+    })
+
+  autoTable(doc, {
+      startY: totalsStartY,
+      head: [],
+      body: [totalsRow],
+      theme: "grid",
+      margin: tableMargin,
+      tableWidth: innerW,
+      styles: {
+        fontSize: 9,
+        cellPadding: 4,
+        lineColor: [0, 0, 0],
+        textColor: 34,
+        overflow: "visible",
+        valign: "middle",
+      },
+      columnStyles: colWidths.reduce((acc: Record<number, any>, w, i) => {
+        const header = headers[i] ?? ""
+        acc[i] = { cellWidth: w, valign: "top", halign: header === "Incoming" || header === "Expense" || header === "Running" ? "right" : "left" }
+        // Style income/expense columns in totals table
+        if (header === "Incoming") { acc[i].fontStyle = "bold"; acc[i].textColor = [6, 95, 70]; }
+        if (header === "Expense") { acc[i].fontStyle = "bold"; acc[i].textColor = [153, 27, 27]; }
+        return acc
+      }, {}),
+      tableLineWidth: 0.5,
+      tableLineColor: [0, 0, 0],
+    })
+
+    // Where should the balance appear? If running column is present, print under Running. Otherwise print under Expense with a label.
+    const runningIdx = headers.indexOf("Running")
+    const expenseIdx = headers.indexOf("Expense")
+    const balanceRow: (string | number)[] = headers.map((_, i) => {
+      if (includeCumulative && runningIdx >= 0 && i === runningIdx) return formatAmount(totals.net)
+  if (!includeCumulative && expenseIdx >= 0 && i === expenseIdx) return formatAmount(totals.net)
+      return ""
+    })
+    const balanceStartY = ((doc as any).lastAutoTable?.finalY ?? totalsStartY) + 8
+    autoTable(doc, {
+      startY: balanceStartY,
+      head: [],
+      body: [balanceRow],
+      theme: "grid",
+      margin: tableMargin,
+      tableWidth: innerW,
+      styles: {
+        fontSize: 10,
+        cellPadding: 4,
+        lineColor: [0, 0, 0],
+        textColor: 34,
+        overflow: "visible",
+        valign: "middle",
+      },
+      columnStyles: colWidths.reduce((acc: Record<number, any>, w, i) => {
+        acc[i] = { cellWidth: w, valign: "top", halign: "left" }
+        if ((includeCumulative && i === runningIdx) || (!includeCumulative && i === expenseIdx)) {
+          acc[i].fontStyle = "bold"
+          acc[i].textColor = [30, 64, 175]
+          acc[i].halign = "right"
+        }
+        return acc
+      }, {}),
+      tableLineWidth: 0.5,
+      tableLineColor: [0, 0, 0],
     })
 
     // Signatures
@@ -561,7 +784,7 @@ export default function ReportsPage() {
     doc.setFontSize(10)
     doc.setTextColor(ink)
     doc.text("Prepared by:", marginX, sigY)
-    doc.line(marginX, sigY + 24, marginX + 180, sigY + 24)
+    doc.line(marginX, sigY + 24, marginX + 180, sigY + 24) 
     doc.text("Approved by:", pageW - marginX - 200, sigY)
     doc.line(pageW - marginX - 200, sigY + 24, pageW - marginX, sigY + 24)
 
@@ -570,19 +793,19 @@ export default function ReportsPage() {
 
   // Preview / Open / Download
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
-  function handlePreview() {
-    const doc = buildDoc()
-    if (previewUrl) { try { URL.revokeObjectURL(previewUrl) } catch {} }
+  async function handlePreview() {
+    const doc = await buildDoc()
+  if (previewUrl) { try { URL.revokeObjectURL(previewUrl) } catch (err) { console.debug('Failed to revoke preview URL', err) } }
     const blob = doc.output("blob")
     const url = URL.createObjectURL(blob)
     setPreviewUrl(url)
   }
-  function handleOpen() {
-    const doc = buildDoc()
+  async function handleOpen() {
+    const doc = await buildDoc()
     window.open(URL.createObjectURL(doc.output("blob")))
   }
-  function handleDownload() {
-    const doc = buildDoc()
+  async function handleDownload() {
+    const doc = await buildDoc()
     doc.save(`statement_${from}_to_${to}.pdf`)
   }
   useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl) }, [previewUrl])
@@ -595,6 +818,69 @@ export default function ReportsPage() {
   const categoryOpts: Option[] = (categories ?? []).map(c => ({ id: c.id, label: `${c.name} (${c.kind.toLowerCase()})` }))
 
   // ========================== UI ==========================
+  // Build visible headers for UI (match PDF headers)
+  const visibleHeaders: string[] = []
+  visibleHeaders.push("Date")
+  if (includeKind) visibleHeaders.push("Kind")
+  visibleHeaders.push("Division")
+  if (includeArea) visibleHeaders.push("Area")
+  if (includeTagged) visibleHeaders.push("Tagged To")
+  visibleHeaders.push("Category", "Incoming", "Expense")
+  if (includeCumulative) visibleHeaders.push("Running")
+  if (includeNotes) visibleHeaders.push("Notes")
+
+  // Width map for UI columns (px)
+  const uiWidthMap: Record<string, string> = {
+    Date: "110px",
+    Kind: "80px",
+    Division: "160px",
+    Area: "120px",
+    "Tagged To": "140px",
+    Category: "140px",
+    Incoming: "100px",
+    Expense: "100px",
+    Running: "110px",
+    Notes: "220px",
+  }
+
+  // Build UI rows with numeric fields and running cumulative when requested
+  const uiRows = useMemo(() => {
+    const list: any[] = (rows ?? []).map((r) => {
+      const amt = Number(r.amount) || 0
+      const tagged = firstPerson(r.person, "") || firstName(r.group as any, "") || "—"
+      const area = (Array.isArray(r.division) ? r.division[0]?.area : (r.division as any)?.area) ?? "—"
+      return {
+        date: r.ts,
+        kind: r.kind,
+        kindLabel: kindLabel(r.kind),
+        division: firstName(r.division, "—"),
+        area,
+        tagged,
+        category: firstName(r.category, "—"),
+        incomingNum: r.kind === "INCOMING" ? amt : 0,
+        expenseNum: r.kind === "OUTGOING" ? amt : 0,
+        incoming: r.kind === "INCOMING" ? inr(amt) : "",
+        expense: r.kind === "OUTGOING" ? inr(amt) : "",
+        notes: r.notes ?? "—",
+      }
+    })
+
+    if (includeArea) {
+      list.sort((a, b) => a.area.localeCompare(b.area, undefined, { sensitivity: "accent" }))
+    }
+
+    if (includeCumulative) {
+      let running = 0
+      for (let i = 0; i < list.length; i++) {
+        running += (list[i].incomingNum || 0) - (list[i].expenseNum || 0)
+        list[i].runningNum = running
+        list[i].running = inr(running)
+      }
+    }
+
+    return list
+  }, [rows, includeArea, includeCumulative])
+
   return (
     <div className="container">
       <h1 className="h1">Advanced Reports</h1>
@@ -629,6 +915,18 @@ export default function ReportsPage() {
               Categorize by Area (Division)
             </label>
             <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={includeTagged} onChange={(e) => setIncludeTagged(e.target.checked)} />
+              Show “Tagged To” column
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={includeKind} onChange={(e) => setIncludeKind(e.target.checked)} />
+              Show “Kind” column
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={includeCumulative} onChange={(e) => setIncludeCumulative(e.target.checked)} />
+              Show running balance (cumulative)
+            </label>
+            <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={includeNotes} onChange={(e) => setIncludeNotes(e.target.checked)} />
               Include “Notes” in PDF
             </label>
@@ -660,46 +958,107 @@ export default function ReportsPage() {
 
         {/* Table (onscreen) */}
         <div className="overflow-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm" style={{ borderCollapse: "collapse", border: "1px solid #000" }}>
             <thead>
-              <tr className="text-left border-b">
-                <th className="py-2 pr-3">Date</th>
-                <th className="py-2 pr-3">Kind</th>
-                <th className="py-2 pr-3">Division</th>
-                {includeArea && <th className="py-2 pr-3">Area</th>}
-                <th className="py-2 pr-3">Tagged To</th>
-                <th className="py-2 pr-3">Category</th>
-                <th className="py-2 pr-3">Amount</th>
-                {includeNotes && <th className="py-2 pr-3">Notes</th>}
+              <tr>
+                {visibleHeaders.map((h) => (
+                  <th key={h} className="py-2 pr-3 bg-red-700 text-white" style={{ border: "1px solid #000", textAlign: h === "Incoming" || h === "Expense" || h === "Running" ? "right" : "left", width: uiWidthMap[h] }}>
+                    {h}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {isLoading && (
                 <tr>
-                  <td colSpan={includeArea ? (includeNotes ? 8 : 7) : (includeNotes ? 7 : 6)} className="py-3 text-gray-500">Loading…</td>
+                  <td colSpan={visibleHeaders.length} className="py-3 text-gray-500" style={{ border: "1px solid #000" }}>Loading…</td>
                 </tr>
               )}
-              {!isLoading && (rows ?? []).length === 0 && (
+              {!isLoading && uiRows.length === 0 && (
                 <tr>
-                  <td colSpan={includeArea ? (includeNotes ? 8 : 7) : (includeNotes ? 7 : 6)} className="py-3 text-gray-500">No entries.</td>
+                  <td colSpan={visibleHeaders.length} className="py-3 text-gray-500" style={{ border: "1px solid #000" }}>No entries.</td>
                 </tr>
               )}
-              {(rows ?? []).map((r, i) => {
-                const tagged = firstPerson(r.person, "") || firstName(r.group as any, "") || "—"
-                const area = (Array.isArray(r.division) ? r.division[0]?.area : (r.division as any)?.area) ?? "—"
-                return (
-                  <tr key={i} className="border-b">
-                    <td className="py-2 pr-3">{r.ts}</td>
-                    <td className="py-2 pr-3">{kindLabel(r.kind)}</td>
-                    <td className="py-2 pr-3">{firstName(r.division)}</td>
-                    {includeArea && <td className="py-2 pr-3">{area}</td>}
-                    <td className="py-2 pr-3">{tagged}</td>
-                    <td className="py-2 pr-3">{firstName(r.category)}</td>
-                    <td className="py-2 pr-3 font-medium">{inr(r.amount)}</td>
-                    {includeNotes && <td className="py-2 pr-3">{r.notes ?? "—"}</td>}
-                  </tr>
-                )
-              })}
+
+              {uiRows.map((r, i) => (
+                <tr key={i} style={{ borderBottom: "1px solid #e5e7eb" }}>
+                  {visibleHeaders.map((h) => {
+                    const nowrap = ["Date", "Kind", "Incoming", "Expense", "Running"].includes(h)
+                    const style: React.CSSProperties = { border: "1px solid #000", padding: "8px" }
+                    if (nowrap) style.whiteSpace = "nowrap"
+                    if (h === "Incoming") return <td key={h} style={{ ...style, textAlign: "right", fontWeight: 600 }}>{r.incoming}</td>
+                    if (h === "Expense") return <td key={h} style={{ ...style, textAlign: "right", fontWeight: 600 }}>{r.expense}</td>
+                    if (h === "Running") return <td key={h} style={{ ...style, textAlign: "right", fontWeight: 600 }}>{r.running ?? ""}</td>
+                    if (h === "Date") return <td key={h} style={style}>{r.date}</td>
+                    if (h === "Kind") return <td key={h} style={style}>{r.kindLabel}</td>
+                    if (h === "Division") return <td key={h} style={style}>{r.division}</td>
+                    if (h === "Area") return <td key={h} style={style}>{r.area}</td>
+                    if (h === "Tagged To") return <td key={h} style={style}>{r.tagged}</td>
+                    if (h === "Category") return <td key={h} style={style}>{r.category}</td>
+                    if (h === "Notes") return <td key={h} style={style}>{r.notes}</td>
+                    return <td key={h} style={style}>{""}</td>
+                  })}
+                </tr>
+              ))}
+
+              {/* Totals row */}
+              {uiRows.length > 0 && (
+                <tr>
+                  {(() => {
+                    const incomingIdx = visibleHeaders.indexOf("Incoming")
+                    const cells: any[] = []
+                    const balance = totals.inc - totals.out
+                    const runningIdx = visibleHeaders.indexOf("Running")
+                    const expenseIdx = visibleHeaders.indexOf("Expense")
+                    for (let j = 0; j < visibleHeaders.length; j++) {
+                      // First cell: render Totals label spanning columns before Incoming
+                      if (j === 0) {
+                        const span = incomingIdx > 0 ? incomingIdx : 1
+                        cells.push(
+                          <td key="totals-label" colSpan={span} style={{ border: "1px solid #000", padding: "8px", fontWeight: 700 }}>
+                            Totals
+                          </td>
+                        )
+                        // skip the spanned columns
+                        j = span - 1
+                        continue
+                      }
+
+                      if (j === incomingIdx) {
+                        cells.push(<td key="totals-inc" style={{ border: "1px solid #000", padding: "8px", textAlign: "right", fontWeight: 700, color: "#065f46" }}>{inr(totals.inc)}</td>)
+                        continue
+                      }
+
+                      if (j === incomingIdx + 1) {
+                        cells.push(<td key="totals-exp" style={{ border: "1px solid #000", padding: "8px", textAlign: "right", fontWeight: 700, color: "#991b1b" }}>{inr(totals.out)}</td>)
+                        continue
+                      }
+
+                      // Running column placeholder
+                      if (includeCumulative && j === incomingIdx + 2) {
+                        cells.push(<td key="totals-running" style={{ border: "1px solid #000", padding: "8px" }} />)
+                        continue
+                      }
+
+                      // If running column is visible, show balance there
+                      if (includeCumulative && j === runningIdx) {
+                        cells.push(<td key="totals-balance" style={{ border: "1px solid #000", padding: "8px", textAlign: "right", fontWeight: 700, color: "#1e40af" }}>{inr(balance)}</td>)
+                        continue
+                      }
+                      // Otherwise, put the balance amount in the Expense column
+                      if (!includeCumulative && j === expenseIdx) {
+                        cells.push(<td key="totals-balance" style={{ border: "1px solid #000", padding: "8px", textAlign: "right", fontWeight: 700, color: "#1e40af" }}>{inr(balance)}</td>)
+                        continue
+                      }
+
+                      // otherwise empty cell
+                      cells.push(<td key={`totals-empty-${j}`} style={{ border: "1px solid #000", padding: "8px" }} />)
+                    }
+                    return cells
+                  })()}
+                </tr>
+              )}
+
             </tbody>
           </table>
         </div>
