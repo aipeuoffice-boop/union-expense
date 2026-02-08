@@ -608,7 +608,6 @@ export default function ReportsPage() {
 
     // Helpers to compute centers for section labels
     const idxSep1 = headers.indexOf("|")
-    const idxSep2 = includeCumulative ? headers.lastIndexOf("|") : -1
     const xStart = tableMargin.left
     const sumW = (fromIdx: number, toIdxInclusive: number) => {
       let s = 0
