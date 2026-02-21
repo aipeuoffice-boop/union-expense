@@ -72,6 +72,11 @@ function parseISODateSafe(s: string) {
   if (!yy || !mm || !dd) return new Date(0)
   return new Date(yy, mm - 1, dd)
 }
+function formatISOToDDMMYYYY(s: string) {
+  const [yy, mm, dd] = (s || "").split("-")
+  if (!yy || !mm || !dd) return s
+  return `${dd}-${mm}-${yy}`
+}
 
 // ---------- Mobile-friendly MultiPicker ----------
 type Option = { id: string; label: string }
@@ -658,12 +663,12 @@ export default function ReportsPage() {
       const inc = r.inc
       const exp = r.exp
 
-      const leftDate = inc ? inc.ts : (alignTwoSidedRows ? dash : "")
+      const leftDate = inc ? formatISOToDDMMYYYY(inc.ts) : (alignTwoSidedRows ? dash : "")
       const leftDiv = inc ? inc.division : (alignTwoSidedRows ? dash : "")
       const leftCat = inc ? inc.category : (alignTwoSidedRows ? dash : "")
       const leftAmt = inc ? formatAmount(inc.incoming) : (alignTwoSidedRows ? dash : "")
 
-      const rightDate = exp ? exp.ts : (alignTwoSidedRows ? dash : "")
+      const rightDate = exp ? formatISOToDDMMYYYY(exp.ts) : (alignTwoSidedRows ? dash : "")
       const rightDiv = exp ? exp.division : (alignTwoSidedRows ? dash : "")
       const rightCat = exp ? exp.category : (alignTwoSidedRows ? dash : "")
       const rightAmt = exp ? formatAmount(exp.expense) : (alignTwoSidedRows ? dash : "")
